@@ -1,0 +1,1 @@
+nuscenes-devkit @ git+https://github.com/Fellfalla/nuscenes-devkit.git@master
