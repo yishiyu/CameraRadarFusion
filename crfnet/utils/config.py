@@ -50,6 +50,7 @@ def get_config(config_file):
             self.batchsize = config.getint('HYPERPARAMETERS', 'batchsize')
             self.epochs = config.getint('HYPERPARAMETERS', 'epochs')
             self.start_epoch = config.getint('HYPERPARAMETERS','start_epoch')
+            self.image_dropout = config.getfloat('HYPERPARAMETERS', 'image_dropout')
 
     cfg = Configuration()
     return cfg

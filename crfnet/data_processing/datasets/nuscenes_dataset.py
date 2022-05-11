@@ -310,27 +310,37 @@ class NuscenesDataset(data.Dataset):
         # 调整一下通道顺序就行了
         return image_full, annotations
 
-    def collate_fn(self, batch):
+    @staticmethod
+    def collate_fn(image_dropout):
         """
         指导dataloader如何把不同数据中不同数量的目标(框)合并成一个batch
+        调用后生成一个合并函数
+        image_dropout: 图片清空的概率
         """
-        images = []
-        labels = []
-        bboxes = []
-        distances = []
-        visibilities = []
 
-        for b in batch:
-            images.append(torch.tensor(b[0]))
-            labels.append(torch.tensor(b[1]['labels']))
-            bboxes.append(torch.tensor(b[1]['bboxes']))
-            distances.append(torch.tensor(b[1]['distances']))
-            visibilities.append(torch.tensor(b[1]['visibilities']))
-        
-        images = torch.stack(images, dim=0)
-        
+        def collecter(batch):
+            images = []
+            labels = []
+            bboxes = []
+            distances = []
+            visibilities = []
 
-        return images, labels, bboxes, distances, visibilities
+            for b in batch:
+                if np.random.rand() < image_dropout:
+                    images.append(torch.zeros(b[0].shape))
+                    # images.append(torch.zeros_like(b[0]))
+                else:
+                    images.append(torch.tensor(b[0]))
+                labels.append(torch.tensor(b[1]['labels']))
+                bboxes.append(torch.tensor(b[1]['bboxes']))
+                distances.append(torch.tensor(b[1]['distances']))
+                visibilities.append(torch.tensor(b[1]['visibilities']))
+
+            images = torch.stack(images, dim=0)
+
+            return images, labels, bboxes, distances, visibilities
+
+        return collecter
 
 if __name__ == '__main__':
 
