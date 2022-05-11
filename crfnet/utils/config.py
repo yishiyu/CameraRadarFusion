@@ -10,6 +10,7 @@ def get_config(config_file):
         def __init__(self):
             # 路径参数
             self.data_dir = config['PATH']['data_dir']
+            self.checkpoints_dir = config['PATH']['checkpoints_dir']
 
             # 数据集参数
             self.nusc_version = config['DATASET']['nusc_version']
@@ -48,6 +49,7 @@ def get_config(config_file):
             self.learning_rate = config.getfloat('HYPERPARAMETERS', 'learning_rate')
             self.batchsize = config.getint('HYPERPARAMETERS', 'batchsize')
             self.epochs = config.getint('HYPERPARAMETERS', 'epochs')
+            self.start_epoch = config.getint('HYPERPARAMETERS','start_epoch')
 
     cfg = Configuration()
     return cfg
