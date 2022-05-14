@@ -79,11 +79,12 @@ if __name__ == '__main__':
 
     # 训练数据
     # TODO 添加测试数据集加载并在训练时使用
-    train_dataset = NuscenesDataset(data_version='v1.0-mini', opts=config)
+    train_dataset = NuscenesDataset(data_version=config.nusc_version, opts=config)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.batchsize,
                                                collate_fn=train_dataset.collate_fn(
                                                    image_dropout=config.image_dropout),
-                                               shuffle=True, pin_memory=True)
+                                               shuffle=True, pin_memory=True, 
+                                               num_workers=config.num_workders)
 
     # 训练模型参数
     checkpoint_dir = config.checkpoints_dir

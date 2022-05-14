@@ -47,6 +47,7 @@ def get_config(config_file):
 
             # 训练超参数
             self.learning_rate = config.getfloat('HYPERPARAMETERS', 'learning_rate')
+            self.num_workders = config.getint('HYPERPARAMETERS','num_workders')
             self.batchsize = config.getint('HYPERPARAMETERS', 'batchsize')
             self.epochs = config.getint('HYPERPARAMETERS', 'epochs')
             self.start_epoch = config.getint('HYPERPARAMETERS','start_epoch')
