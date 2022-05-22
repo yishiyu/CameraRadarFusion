@@ -332,9 +332,9 @@ class ClassificationSubmodel(nn.Module):
         batch_size = features.size()[0]
 
         output = F.relu(self.cls_conv1(features))
-        output = F.relu(self.cls_conv2(features))
-        output = F.relu(self.cls_conv3(features))
-        output = F.relu(self.cls_conv4(features))
+        output = F.relu(self.cls_conv2(output))
+        output = F.relu(self.cls_conv3(output))
+        output = F.relu(self.cls_conv4(output))
 
         # (batch_size, num_anchors * cls_num, xx, xx)
         output = F.sigmoid(self.cls_predict(output))
@@ -374,9 +374,9 @@ class RegressionSubmodel(nn.Module):
         batch_size = features.size()[0]
 
         output = F.relu(self.loc_conv1(features))
-        output = F.relu(self.loc_conv2(features))
-        output = F.relu(self.loc_conv3(features))
-        output = F.relu(self.loc_conv4(features))
+        output = F.relu(self.loc_conv2(output))
+        output = F.relu(self.loc_conv3(output))
+        output = F.relu(self.loc_conv4(output))
 
         # (batch_size, num_anchors * 4, xx, xx)
         output = self.loc_regress(output)
@@ -406,6 +406,10 @@ class CRFNet(nn.Module):
         # 创建Prior boxes(Anchors)()
         self.anchors_cxcy = self.create_anchors()
 
+        # 原始图像的大小(即输入图像的大小)
+        # 这样写后面好算
+        self.image_shape = torch.tensor((360, 640, 360, 640), device=device)
+
         # 加载预训练的VGG网络
         if load_pretrained_vgg:
             self.backbone.load_pretrained_layers()
@@ -423,8 +427,13 @@ class CRFNet(nn.Module):
         # loc ==> (batch_size, num_anchors * feature.shape, 4)
         # cls ==> (batch_size, num_anchors * feature.shape, cls_num)
 
-        loc = torch.cat(loc, dim=1)
+        # 将预测的锚点偏移加上对应的锚点
+        loc = self.regress_boxes(torch.cat(loc, dim=1))
         cls = torch.cat(cls, dim=1)
+
+        # TODO 添加 NMS
+        # 对应 retinanet.py 372
+
         return loc, cls
 
     def create_anchors(self):
@@ -482,11 +491,18 @@ class CRFNet(nn.Module):
                     for ratio in aspect_ratios:
                         # 不同
                         for scale in scales:
+                            w_half = scale[1] * ratio / 2
+                            h_half = scale[0] / ratio / 2
+                            # cxcyxxyy = (
+                            #     cx, cy,
+                            #     scale[1] * ratio,
+                            #     scale[0] / ratio
+                            # )
                             anchors.append(
-                                (cx,
-                                 cy,
-                                 scale[1] * ratio,
-                                 scale[0] / ratio)
+                                (cx - w_half,
+                                 cy - h_half,
+                                 cx + w_half,
+                                 cy + h_half)
                             )
             pass
 
@@ -495,8 +511,41 @@ class CRFNet(nn.Module):
         anchors.clamp_(0, 1)
         # (42975, 4)
         # 对应到generator.py 303
-        # 不过格式是相对比例的(cx,cy,x,y)
+        # 不过格式是相对比例的(x,y,x,y)
         return anchors
+
+    def regress_boxes(self, pred, mean=None, std=None):
+        # 对应retinanet.py 368
+        # pred中的预测数据为偏移值
+        if mean is None:
+            mean = np.array([0, 0, 0, 0])
+        if std is None:
+            std = np.array([0.2, 0.2, 0.2, 0.2])
+
+        # [0.0063, 0.0111, 0.0088, 0.0314]
+        # [0.0063, 0.0111, 0.0111, 0.0396]
+        # [0.0063, 0.0111, 0.0140, 0.0499]
+        # pred.shape ==> (batch_size, 42975, 4)
+        # self.anchors_cxcy ==> (42975, 4)
+        width  = self.anchors_cxcy[:, 2] - self.anchors_cxcy[:, 0]
+        height = self.anchors_cxcy[:, 3] - self.anchors_cxcy[:, 1]
+        x1 = self.anchors_cxcy[:, 0] + (pred[:, :, 0] * std[0] + mean[0]) * width
+        y1 = self.anchors_cxcy[:, 1] + (pred[:, :, 1] * std[1] + mean[1]) * height
+        x2 = self.anchors_cxcy[:, 2] + (pred[:, :, 2] * std[2] + mean[2]) * width
+        y2 = self.anchors_cxcy[:, 3] + (pred[:, :, 3] * std[3] + mean[3]) * height
+
+        # 对应 retinanet.py 368
+        pred_boxes = torch.stack((x1,y1,x2,y2), dim=2)
+
+        # 对应 retinanet.py 369
+        pred_boxes.clamp_(0, 1)
+
+        # 将原始图像大小乘以预测的图片比例位置,得到像素位置
+        # pred_boxes.shape ==> (batch_size, 42975, 4)
+        # self.image_shape ==> (4)
+        pred_boxes = pred_boxes * self.image_shape
+        
+        return pred_boxes
 
 
 if __name__ == '__main__':
@@ -511,7 +560,8 @@ if __name__ == '__main__':
     from data_processing.datasets.nuscenes_dataset import NuscenesDataset
     datasets = NuscenesDataset(opts=config)
     train_loader = torch.utils.data.DataLoader(datasets, batch_size=2,
-                                               collate_fn=datasets.collate_fn,
+                                               collate_fn=datasets.collate_fn(
+                                                   image_dropout=0),
                                                shuffle=True, pin_memory=True)
 
     model = CRFNet(opts=config).to(device)
