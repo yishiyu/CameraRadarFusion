@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import torchvision
 from .loss import CRFLoss
+from torchvision.ops import nms
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -410,6 +411,12 @@ class CRFNet(nn.Module):
         # 这样写后面好算
         self.image_shape = torch.tensor((360, 640, 360, 640), device=device)
 
+        # filter 设置
+        self.nms = opts.nms
+        self.nms_threshold = opts.nms_threshold
+        self.score_threshold = opts.score_threshold
+        self.max_detections = opts.max_detections
+
         # 加载预训练的VGG网络
         if load_pretrained_vgg:
             self.backbone.load_pretrained_layers()
@@ -428,13 +435,18 @@ class CRFNet(nn.Module):
         # cls ==> (batch_size, num_anchors * feature.shape, cls_num)
 
         # 将预测的锚点偏移加上对应的锚点
-        loc = self.regress_boxes(torch.cat(loc, dim=1))
+        loc = torch.cat(loc, dim=1)
         cls = torch.cat(cls, dim=1)
 
-        # TODO 添加 NMS
-        # 对应 retinanet.py 372
-
         return loc, cls
+
+    def predict(self, x):
+        # 对应 retinanet.py 372
+        loc, cls = self.forward(x)
+        loc = self.regress_boxes(loc)
+
+        return self.detection_filter(loc, cls)
+
 
     def create_anchors(self):
 
@@ -527,15 +539,19 @@ class CRFNet(nn.Module):
         # [0.0063, 0.0111, 0.0140, 0.0499]
         # pred.shape ==> (batch_size, 42975, 4)
         # self.anchors_cxcy ==> (42975, 4)
-        width  = self.anchors_cxcy[:, 2] - self.anchors_cxcy[:, 0]
+        width = self.anchors_cxcy[:, 2] - self.anchors_cxcy[:, 0]
         height = self.anchors_cxcy[:, 3] - self.anchors_cxcy[:, 1]
-        x1 = self.anchors_cxcy[:, 0] + (pred[:, :, 0] * std[0] + mean[0]) * width
-        y1 = self.anchors_cxcy[:, 1] + (pred[:, :, 1] * std[1] + mean[1]) * height
-        x2 = self.anchors_cxcy[:, 2] + (pred[:, :, 2] * std[2] + mean[2]) * width
-        y2 = self.anchors_cxcy[:, 3] + (pred[:, :, 3] * std[3] + mean[3]) * height
+        x1 = self.anchors_cxcy[:, 0] + \
+            (pred[:, :, 0] * std[0] + mean[0]) * width
+        y1 = self.anchors_cxcy[:, 1] + \
+            (pred[:, :, 1] * std[1] + mean[1]) * height
+        x2 = self.anchors_cxcy[:, 2] + \
+            (pred[:, :, 2] * std[2] + mean[2]) * width
+        y2 = self.anchors_cxcy[:, 3] + \
+            (pred[:, :, 3] * std[3] + mean[3]) * height
 
         # 对应 retinanet.py 368
-        pred_boxes = torch.stack((x1,y1,x2,y2), dim=2)
+        pred_boxes = torch.stack((x1, y1, x2, y2), dim=2)
 
         # 对应 retinanet.py 369
         pred_boxes.clamp_(0, 1)
@@ -544,8 +560,61 @@ class CRFNet(nn.Module):
         # pred_boxes.shape ==> (batch_size, 42975, 4)
         # self.image_shape ==> (4)
         pred_boxes = pred_boxes * self.image_shape
-        
+
         return pred_boxes
+
+    def _batch_detection_filter(self, boxes, classification):
+        # nms 函数文档： https://pytorch.org/vision/main/generated/torchvision.ops.nms.html
+        # boxes          ==> (num_anchors * feature.shape, 4)
+        # classification ==> (num_anchors * feature.shape, cls_num)
+        # 输出被筛选后的[boxes, scores, labels]
+
+        final_output = []
+        # 1. 根据 score_threshold 筛选
+        scores = torch.max(classification, axis=1).values
+        labels = torch.argmax(classification, axis=1)
+        indices = torch.where(scores > self.score_threshold)[0]
+        filtered_boxes = boxes[indices]
+        filtered_scores = scores[indices]
+
+        # 2. 执行 NMS
+        nms_indices = nms(filtered_boxes, filtered_scores, self.nms_threshold)
+        nms_indices = indices[nms_indices]
+
+        # 3. 选择最多 max_detections 个 box (top k)
+        scores = scores[nms_indices]
+        scores, topk_indices = torch.topk(
+            scores, min(self.max_detections, scores.shape[0]))
+        topk_indices = nms_indices[topk_indices]
+        labels = labels[topk_indices]
+        boxes = boxes[topk_indices]
+
+        # 4. zero pad
+        padding_size = max(0, self.max_detections - scores.shape[0])
+        boxes = F.pad(boxes, [0, 0, 0, padding_size], value=-1)
+        scores = F.pad(scores, [0, padding_size], value=-1)
+        labels = F.pad(labels, [0, padding_size], value=-1)
+        labels = labels.to(torch.int32)
+
+        # 5. set shapes
+        boxes.reshape([self.max_detections, 4])
+        scores.reshape([self.max_detections])
+        labels.reshape([self.max_detections])
+
+        return [boxes, scores, labels]
+
+    def detection_filter(self, boxes, classification):
+        filtered = []
+        # 对每个 batch 分别进行 NMS 处理
+        for b in boxes.shape[0]:
+            filtered.append(
+                self._batch_detection_filter(boxes[b],
+                                             classification[b])
+            )
+        # filtered = [
+        #   [boxes, scores, labels] * batch_size
+        # ]
+        return filtered
 
 
 if __name__ == '__main__':
@@ -574,6 +643,7 @@ if __name__ == '__main__':
         labels = [l.to(device) for l in labels]
         predicted_loc, predicted_cls = model(images)
 
-        loss = crf_loss(predicted_loc, predicted_cls, labels, bboxes)
+        # model._batch_detection_filter(predicted_loc[0], predicted_cls[0])
+        # loss = crf_loss(predicted_loc, predicted_cls, labels, bboxes)
         pass
     pass
