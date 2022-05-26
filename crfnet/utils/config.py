@@ -53,5 +53,11 @@ def get_config(config_file):
             self.start_epoch = config.getint('HYPERPARAMETERS','start_epoch')
             self.image_dropout = config.getfloat('HYPERPARAMETERS', 'image_dropout')
 
+            # 模型Filter
+            self.nms = config.getboolean('MODELFILTER', 'nms')
+            self.nms_threshold = config.getfloat('MODELFILTER', 'nms_threshold')
+            self.score_threshold = config.getfloat('MODELFILTER', 'score_threshold')
+            self.max_detections = config.getint('MODELFILTER','max_detections')
+
     cfg = Configuration()
     return cfg
