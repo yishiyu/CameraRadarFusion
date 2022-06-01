@@ -1,22 +1,26 @@
-import os
-from torch.utils import data
-import torch
-from tqdm import tqdm
-from nuscenes.nuscenes import NuScenes
-
-# if __name__ == '__main__':
 import sys
+import os
 sys.path.insert(0, os.path.join(
     os.path.dirname(__file__), '..', '..', '..'))
 # import crfnet.data_processing  # noqa: F401
 __package__ = "crfnet.data_processing.data_loader"
 
+from ...utils.compute_overlap import compute_overlap
+from nuscenes.nuscenes import NuScenes
+from tqdm import tqdm
+import torch
+from torch.utils import data
 from ..fusion.fusion_projection_lines import imageplus_creation
 from ...utils.nuscenes_helper import get_sensor_sample_data
 from nuscenes.utils.data_classes import RadarPointCloud
 from ...utils import radar
 import numpy as np
 from nuscenes.utils.geometry_utils import BoxVisibility, box_in_image, points_in_box
+from ...utils.anchors import create_anchors_xyxy_absolute
+
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class NuscenesDataset(data.Dataset):
@@ -42,6 +46,7 @@ class NuscenesDataset(data.Dataset):
         # 创建 name<==>label 的双向映射
         self.classes, self.labels = self._get_class_label_mapping(
             [c['name'] for c in self.nusc.category], opts.category_mapping)
+        self.cls_num = len(self.labels)
 
         # 融合参数
         self.image_target_shape = opts.image_size
@@ -49,6 +54,9 @@ class NuscenesDataset(data.Dataset):
 
         # 获取数据集中的所有 sample
         self.samples = self.nusc.sample
+
+        # 创建 anchors
+        self.anchors = create_anchors_xyxy_absolute().cpu().numpy()
 
     @staticmethod
     def _get_class_label_mapping(category_names, category_mapping):
@@ -65,7 +73,7 @@ class NuscenesDataset(data.Dataset):
         original_name_to_label = {}
         original_category_names = category_names.copy()
         # yishiyu 将bg放在第一个(下标为0)
-        original_category_names.insert(0,'bg')
+        original_category_names.insert(0, 'bg')
         # original_category_names.append('bg')
         if category_mapping is None:
             # Create identity mapping and ignore no class
@@ -259,6 +267,132 @@ class NuscenesDataset(data.Dataset):
 
         return annotations
 
+    def compute_gt_annotations(
+        self,
+        anchors,
+        annotations,
+        negative_overlap=0.4,
+        positive_overlap=0.5
+    ):
+        """ Obtain indices of gt annotations with the greatest overlap.
+
+        Args
+            anchors: np.array of annotations of shape (N, 4) for (x1, y1, x2, y2).
+            annotations: np.array of shape (N, 5) for (x1, y1, x2, y2, label).
+            negative_overlap: IoU overlap for negative anchors (all anchors with overlap < negative_overlap are negative).
+            positive_overlap: IoU overlap or positive anchors (all anchors with overlap > positive_overlap are positive).
+
+        Returns
+            positive_indices: indices of positive anchors
+            ignore_indices: indices of ignored anchors
+            argmax_overlaps_inds: ordered overlaps indices
+        """
+
+        # overlaps = compute_overlap(anchors.astype(np.float64), annotations.astype(np.float64))
+        overlaps = compute_overlap(anchors, annotations)
+        argmax_overlaps_inds = np.argmax(overlaps, axis=1)
+        max_overlaps = overlaps[np.arange(
+            overlaps.shape[0]), argmax_overlaps_inds]
+
+        # assign "dont care" labels
+        positive_indices = max_overlaps >= positive_overlap
+        ignore_indices = (max_overlaps > negative_overlap) & ~positive_indices
+
+        return positive_indices, ignore_indices, argmax_overlaps_inds
+
+    def bbox_transform(self, anchors, gt_boxes, mean=None, std=None):
+        """Compute bounding-box regression targets for an image."""
+
+        if mean is None:
+            mean = np.array([0, 0, 0, 0])
+        if std is None:
+            std = np.array([0.2, 0.2, 0.2, 0.2])
+
+        if isinstance(mean, (list, tuple)):
+            mean = np.array(mean)
+        elif not isinstance(mean, np.ndarray):
+            raise ValueError(
+                'Expected mean to be a np.ndarray, list or tuple. Received: {}'.format(type(mean)))
+
+        if isinstance(std, (list, tuple)):
+            std = np.array(std)
+        elif not isinstance(std, np.ndarray):
+            raise ValueError(
+                'Expected std to be a np.ndarray, list or tuple. Received: {}'.format(type(std)))
+
+        anchor_widths = anchors[:, 2] - anchors[:, 0]
+        anchor_heights = anchors[:, 3] - anchors[:, 1]
+
+        targets_dx1 = (gt_boxes[:, 0] - anchors[:, 0]) / anchor_widths
+        targets_dy1 = (gt_boxes[:, 1] - anchors[:, 1]) / anchor_heights
+        targets_dx2 = (gt_boxes[:, 2] - anchors[:, 2]) / anchor_widths
+        targets_dy2 = (gt_boxes[:, 3] - anchors[:, 3]) / anchor_heights
+
+        targets = np.stack(
+            (targets_dx1, targets_dy1, targets_dx2, targets_dy2))
+        targets = targets.T
+
+        targets = (targets - mean) / std
+
+        return targets
+
+    def compute_targets(self, anchors, images, annotations,
+                        distance=False,
+                        negative_overlap=0.4,
+                        positive_overlap=0.5,
+                        distance_scaling=100):
+        """根据anchors和annotations生成targets
+
+        Args:
+            anchors (np.array): (N,4)==>(x1,y1,x2,y2)
+            images (np.array): 图像数据
+            annotations (dict): 标注数据
+            distance (bool, optional): 是否生成距离标签. Defaults to False.
+            negative_overlap (float, optional): IoU overlap for negative anchors (all anchors with overlap < negative_overlap are negative). Defaults to 0.4.
+            positive_overlap (float, optional): IoU overlap or positive anchors (all anchors with overlap > positive_overlap are positive). Defaults to 0.5.
+            distance_scaling (int, optional): 距离上限-. Defaults to 100.
+        """
+        # 对应anchor_calc.py 48
+        assert('bboxes' in annotations), "Annotations should contain bboxes."
+        assert('labels' in annotations), "Annotations should contain labels."
+
+        # regression_targets ==> (N, x1, y1, x2, y2, states)
+        # states:-1 for ignore, 0 for bg, 1 for fg
+        # labels_targets ==> (N, cls_num+1)
+        regression_targets = torch.zeros(
+            (anchors.shape[0], 4+1), dtype=torch.float, device=device)
+        labels_targets = torch.zeros(
+            (anchors.shape[0], self.cls_num+1), dtype=torch.float, device=device)
+        # distance_targets = torch.zeros((anchors.shape[0], 1+1), dtype=torch.float, device=device)
+
+        # 该场景中存在目标
+        if annotations['bboxes'].shape[0]:
+            # obtain indices of gt annotations with the greatest overlap
+            positive_indices, ignore_indices, argmax_overlaps_inds = \
+                self.compute_gt_annotations(
+                    anchors, annotations['bboxes'], negative_overlap, positive_overlap)
+
+            labels_targets[ignore_indices, -1] = -1
+            labels_targets[positive_indices, -1] = 1
+
+            regression_targets[ignore_indices, -1] = -1
+            regression_targets[positive_indices, -1] = 1
+
+            # distance_batch[index, ignore_indices, -1]   = -1
+            # distance_batch[index, positive_indices, -1] = 1
+
+            # compute target class labels
+            pos_overlap_inds = [argmax_overlaps_inds[positive_indices]]
+            label_indices = annotations['labels'][tuple(
+                pos_overlap_inds)].astype(int)
+
+            labels_targets[positive_indices, label_indices] = 1
+
+            regression_targets[:, :-1] = torch.tensor(self.bbox_transform(
+                anchors, annotations['bboxes'][argmax_overlaps_inds, :]))
+
+        return regression_targets, labels_targets
+
     def __getitem__(self, index):
         # 传感器名
         # self.radar_channel = 'RADAR_FRONT'
@@ -298,14 +432,15 @@ class NuscenesDataset(data.Dataset):
         # generator.py 332
         # TODO 根据网络调整
 
-        # TODO anchor相关
+        # anchor相关
         # generator.py 298
+        targets = self.compute_targets(self.anchors, image_full, annotations)
 
-        image_full = image_full.transpose(2,0,1)
+        image_full = image_full.transpose(2, 0, 1)
         # image_full ==> (5, 360, 640)
         # channel first格式,fusion_projection_lines.py中的一些函数用的时候需要调整一下格式
         # 调整一下通道顺序就行了
-        return image_full, annotations
+        return image_full, targets
 
     @staticmethod
     def collate_fn(image_dropout):
@@ -334,10 +469,13 @@ class NuscenesDataset(data.Dataset):
                 visibilities.append(torch.tensor(b[1]['visibilities']))
 
             images = torch.stack(images, dim=0)
+            labels = torch.stack(labels, dim=0)
+            bboxes = torch.stack(bboxes, dim=0)
 
             return images, labels, bboxes, distances, visibilities
 
         return collecter
+
 
 if __name__ == '__main__':
 
@@ -352,8 +490,7 @@ if __name__ == '__main__':
 
     import cv2
     from ..fusion.fusion_projection_lines import create_imagep_visualization
-    imgp_viz = create_imagep_visualization(data[0].transpose(1,2,0))
+    imgp_viz = create_imagep_visualization(data[0].transpose(1, 2, 0))
     cv2.imshow('image', imgp_viz)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-

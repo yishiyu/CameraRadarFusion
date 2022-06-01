@@ -5,6 +5,7 @@ import numpy as np
 import torchvision
 from .loss import CRFLoss
 from torchvision.ops import nms
+from utils.anchors import anchor_parameters, create_anchors_xyxy_relative
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -19,20 +20,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #     "vgg16_bn": "https://download.pytorch.org/models/vgg16_bn-6c64b313.pth",
 #     "vgg19_bn": "https://download.pytorch.org/models/vgg19_bn-c79401a0.pth",
 # }
-
-# Anchors Parameters
-# 参考代码: anchor_parameter.py 46
-# AnchorParameters.small
-anchor_parameters = {
-    'stride': [8, 16, 32, 64, 128],
-    'ratios': [0.5, 1, 2.0],
-    'sizes': [16, 32, 64, 128, 256],
-    # array([1.       , 1.2599211, 1.587401 ])
-    'scales': np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]),
-    # len(ratios) * len(scales)
-    'num_anchors': 9,
-}
-
 
 class BackBoneSubmodel(nn.Module):
     def __init__(self, opts):
@@ -405,7 +392,7 @@ class CRFNet(nn.Module):
         self.regression = RegressionSubmodel(opts)
 
         # 创建Prior boxes(Anchors)()
-        self.anchors_cxcy = self.create_anchors()
+        self.anchors_cxcy = create_anchors_xyxy_relative()
 
         # 原始图像的大小(即输入图像的大小)
         # 这样写后面好算
@@ -433,8 +420,6 @@ class CRFNet(nn.Module):
 
         # loc ==> (batch_size, num_anchors * feature.shape, 4)
         # cls ==> (batch_size, num_anchors * feature.shape, cls_num)
-
-        # 将预测的锚点偏移加上对应的锚点
         loc = torch.cat(loc, dim=1)
         cls = torch.cat(cls, dim=1)
 
@@ -446,85 +431,6 @@ class CRFNet(nn.Module):
         loc = self.regress_boxes(loc)
 
         return self.detection_filter(loc, cls)
-
-
-    def create_anchors(self):
-
-        anchors = []
-        # 不同层输出的特征图的大小
-        fmap_dims = [(45, 80), (22, 40), (11, 20), (6, 10), (3, 5)]
-
-        # 锚点的不同长宽比
-        aspect_ratios = [0.5, 1, 2]
-        aspect_ratios = [np.sqrt(ratio) for ratio in aspect_ratios]
-
-        # 不同层锚点基础大小 = 1 / [(45,80),(22,40),(11,20),(6,10),(3,5)]
-        obj_scales_base = np.array([(1/h, 1/w) for h, w in fmap_dims])
-
-        # 不同大小相对基础大小的比例
-        # array([1.       , 1.2599211, 1.587401 ])
-        obj_scales_ratios = [2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]
-
-        # 不同层锚点大小
-        obj_scales = np.tile(obj_scales_base, 3)
-        obj_scales = obj_scales.reshape((5, 3, 2))
-        obj_scales *= np.tile(obj_scales_ratios, (2, 1)).T
-        # array([[[0.02222222, 0.0125    ],
-        #         [0.02799825, 0.01574901],
-        #         [0.03527558, 0.01984251]],
-
-        #        [[0.04545455, 0.025     ],
-        #         [0.05726914, 0.03149803],
-        #         [0.07215459, 0.03968503]],
-
-        #        [[0.09090909, 0.05      ],
-        #         [0.11453828, 0.06299605],
-        #         [0.14430919, 0.07937005]],
-
-        #        [[0.16666667, 0.1       ],
-        #         [0.20998684, 0.1259921 ],
-        #         [0.26456684, 0.15874011]],
-
-        #        [[0.33333333, 0.2       ],
-        #         [0.41997368, 0.25198421],
-        #         [0.52913368, 0.31748021]]])
-
-        # 不同层输出的不同大小的特征图
-        for k, (height, width) in enumerate(fmap_dims):
-            # 遍历锚点格子
-            for y in range(height):
-                for x in range(width):
-                    # 中心坐标
-                    cx = (x + 0.5) / width
-                    cy = (y + 0.5) / height
-
-                    scales = obj_scales[k]
-                    # 不同长宽比
-                    for ratio in aspect_ratios:
-                        # 不同
-                        for scale in scales:
-                            w_half = scale[1] * ratio / 2
-                            h_half = scale[0] / ratio / 2
-                            # cxcyxxyy = (
-                            #     cx, cy,
-                            #     scale[1] * ratio,
-                            #     scale[0] / ratio
-                            # )
-                            anchors.append(
-                                (cx - w_half,
-                                 cy - h_half,
-                                 cx + w_half,
-                                 cy + h_half)
-                            )
-            pass
-
-        anchors = torch.FloatTensor(anchors).to(device)
-        # 防止越界,调整到[0,1]区间
-        anchors.clamp_(0, 1)
-        # (42975, 4)
-        # 对应到generator.py 303
-        # 不过格式是相对比例的(x,y,x,y)
-        return anchors
 
     def regress_boxes(self, pred, mean=None, std=None):
         # 对应retinanet.py 368
