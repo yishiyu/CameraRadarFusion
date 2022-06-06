@@ -21,6 +21,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #     "vgg19_bn": "https://download.pytorch.org/models/vgg19_bn-c79401a0.pth",
 # }
 
+
 class BackBoneSubmodel(nn.Module):
     def __init__(self, opts):
         super(BackBoneSubmodel, self).__init__()
@@ -141,6 +142,7 @@ class BackBoneSubmodel(nn.Module):
         # 每个block的首个conv层形状不同,所以不能加载预训练参数
         param_index_to_load = [1, 2, 3, 5, 6, 7, 9, 10, 11,
                                12, 13, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25]
+        # param_index_to_set_zero = [0,4,8,14,20]
         # param_index_to_load = [2, 3, 6, 7, 10, 11,
         #                        12, 13, 16, 17, 18, 19,
         #                        22, 23, 24, 25]
@@ -404,9 +406,24 @@ class CRFNet(nn.Module):
         self.score_threshold = opts.score_threshold
         self.max_detections = opts.max_detections
 
+        self.init_weights()
+
         # 加载预训练的VGG网络
         if load_pretrained_vgg:
             self.backbone.load_pretrained_layers()
+
+    def init_weights(self):
+        # 初始化参数
+        for m in self.modules():
+            self.__init_weights(m)
+
+    def __init_weights(self, model):
+        # 初始化权重
+        state_dict = model.state_dict()
+        param_names = list(state_dict.keys())
+        for name in param_names:
+            nn.init.normal_(state_dict[name], mean=0, std=0.1)
+        model.load_state_dict(state_dict)
 
     def forward(self, x):
         # 提取特征
@@ -540,13 +557,14 @@ if __name__ == '__main__':
                                                shuffle=True, pin_memory=True)
 
     model = CRFNet(opts=config).to(device)
-    crf_loss = CRFLoss(anchors_cxcy=model.anchors_cxcy)
+    # model.init_weights()
+    crf_loss = CRFLoss()
 
     # forward
-    for i, (images, labels, bboxes, distances, visibilities) in enumerate(train_loader):
+    for i, (images, bboxes, labels) in enumerate(train_loader):
         images = images.to(device)
-        bboxes = [b.to(device) for b in bboxes]
-        labels = [l.to(device) for l in labels]
+        bboxes = bboxes.to(device)
+        labels = labels.to(device)
         predicted_loc, predicted_cls = model(images)
 
         # model._batch_detection_filter(predicted_loc[0], predicted_cls[0])

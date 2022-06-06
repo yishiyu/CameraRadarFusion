@@ -45,7 +45,7 @@ def train(train_loader, model, loss_fn, optimizer, epoch, print_freq=10):
         # 更新参数
         optimizer.step()
 
-        losses.update(time.time() - start)
+        losses.update(loss)
         batch_time.update(time.time() - start)
         start = time.time()
 
@@ -105,10 +105,10 @@ if __name__ == '__main__':
         model = CRFNet(opts=config, load_pretrained_vgg=True)
 
         # 训练参数
-        lr = 1e-3
+        lr = config.learning_rate
         # TODO 在 ecay_lr_at 个epoch后调整学习率
         # decay_lr_at = [5, 8]
-        momentum = 0.9
+        momentum = 0.3
         weight_decay = 5e-4
 
         parameters = []
@@ -121,7 +121,7 @@ if __name__ == '__main__':
                                     weight_decay=weight_decay)
 
     model = model.to(device)
-    crf_loss = CRFLoss(cls_num=config.cls_num).to(device)
+    crf_loss = CRFLoss().to(device)
 
     for epoch in range(start_epoch, epochs):
         # 调整lr
