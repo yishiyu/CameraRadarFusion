@@ -351,6 +351,9 @@ class NuscenesDataset(data.Dataset):
             negative_overlap (float, optional): IoU overlap for negative anchors (all anchors with overlap < negative_overlap are negative). Defaults to 0.4.
             positive_overlap (float, optional): IoU overlap or positive anchors (all anchors with overlap > positive_overlap are positive). Defaults to 0.5.
             distance_scaling (int, optional): 距离上限-. Defaults to 100.
+        Return:
+            regression_targets: 目标框
+            labels_targets: 分类标签
         """
         # 对应anchor_calc.py 48
         assert('bboxes' in annotations), "Annotations should contain bboxes."
@@ -360,9 +363,9 @@ class NuscenesDataset(data.Dataset):
         # states:-1 for ignore, 0 for bg, 1 for fg
         # labels_targets ==> (N, cls_num+1)
         regression_targets = torch.zeros(
-            (anchors.shape[0], 4+1), dtype=torch.float, device=device)
+            (anchors.shape[0], 4+1), dtype=torch.float)
         labels_targets = torch.zeros(
-            (anchors.shape[0], self.cls_num+1), dtype=torch.float, device=device)
+            (anchors.shape[0], self.cls_num+1), dtype=torch.float)
         # distance_targets = torch.zeros((anchors.shape[0], 1+1), dtype=torch.float, device=device)
 
         # 该场景中存在目标
@@ -434,13 +437,13 @@ class NuscenesDataset(data.Dataset):
 
         # anchor相关
         # generator.py 298
-        targets = self.compute_targets(self.anchors, image_full, annotations)
+        regression_targets, labels_targets = self.compute_targets(self.anchors, image_full, annotations)
 
         image_full = image_full.transpose(2, 0, 1)
         # image_full ==> (5, 360, 640)
         # channel first格式,fusion_projection_lines.py中的一些函数用的时候需要调整一下格式
         # 调整一下通道顺序就行了
-        return image_full, targets
+        return image_full, regression_targets, labels_targets
 
     @staticmethod
     def collate_fn(image_dropout):
@@ -452,27 +455,22 @@ class NuscenesDataset(data.Dataset):
 
         def collecter(batch):
             images = []
-            labels = []
             bboxes = []
-            distances = []
-            visibilities = []
+            labels = []
 
             for b in batch:
                 if np.random.rand() < image_dropout:
                     images.append(torch.zeros(b[0].shape))
-                    # images.append(torch.zeros_like(b[0]))
                 else:
                     images.append(torch.tensor(b[0]))
-                labels.append(torch.tensor(b[1]['labels']))
-                bboxes.append(torch.tensor(b[1]['bboxes']))
-                distances.append(torch.tensor(b[1]['distances']))
-                visibilities.append(torch.tensor(b[1]['visibilities']))
+                bboxes.append(torch.tensor(b[1]))
+                labels.append(torch.tensor(b[2]))
 
             images = torch.stack(images, dim=0)
-            labels = torch.stack(labels, dim=0)
             bboxes = torch.stack(bboxes, dim=0)
+            labels = torch.stack(labels, dim=0)
 
-            return images, labels, bboxes, distances, visibilities
+            return images, bboxes, labels
 
         return collecter
 
@@ -485,6 +483,15 @@ if __name__ == '__main__':
     config = get_config(config_path)
 
     datasets = NuscenesDataset(opts=config)
+    dataloader = torch.utils.data.DataLoader(datasets, batch_size=config.batchsize,
+                                               collate_fn=datasets.collate_fn(
+                                                   image_dropout=config.image_dropout),
+                                               shuffle=True, pin_memory=True, 
+                                               num_workers=config.num_workders)
+
+    for i, data in enumerate(dataloader):
+
+        pass
 
     data = datasets.__getitem__(0)
 
