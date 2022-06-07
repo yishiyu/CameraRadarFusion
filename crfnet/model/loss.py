@@ -34,7 +34,7 @@ class focal_loss(nn.Module):
         # 计算focal loss
         alpha_factor = torch.ones_like(labels) * self.alpha
         alpha_factor = torch.where(labels == 1, alpha_factor, 1-alpha_factor)
-        focal_weight = torch.where(labels == 1, preds, 1-preds)
+        focal_weight = torch.where(labels == 1, 1-preds, preds)
         focal_weight = alpha_factor * focal_weight ** self.gamma
 
         cls_loss = focal_weight * self.cross_entropy(labels, preds)
