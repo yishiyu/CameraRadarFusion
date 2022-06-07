@@ -318,16 +318,19 @@ class ClassificationSubmodel(nn.Module):
             kernel_size=3, stride=1, padding=1
         )
 
+        self.sigmoid = nn.Sigmoid()
+        self.relu = nn.ReLU()
+
     def forward(self, features):
         batch_size = features.size()[0]
 
-        output = F.relu(self.cls_conv1(features))
-        output = F.relu(self.cls_conv2(output))
-        output = F.relu(self.cls_conv3(output))
-        output = F.relu(self.cls_conv4(output))
+        output = self.relu(self.cls_conv1(features))
+        output = self.relu(self.cls_conv2(output))
+        output = self.relu(self.cls_conv3(output))
+        output = self.relu(self.cls_conv4(output))
 
         # (batch_size, num_anchors * cls_num, xx, xx)
-        output = F.sigmoid(self.cls_predict(output))
+        output = self.sigmoid(self.cls_predict(output))
         # (batch_size, xx, xx, num_anchors * cls_num)
         output = output.permute(0, 2, 3, 1).contiguous()
         # (batch_size, num_anchors * feature.shape, cls_num)
@@ -360,13 +363,16 @@ class RegressionSubmodel(nn.Module):
         )
         self.num_anchors = anchor_parameters['num_anchors']
 
+        self.sigmoid = nn.Sigmoid()
+        self.relu = nn.ReLU()
+
     def forward(self, features):
         batch_size = features.size()[0]
 
-        output = F.relu(self.loc_conv1(features))
-        output = F.relu(self.loc_conv2(output))
-        output = F.relu(self.loc_conv3(output))
-        output = F.relu(self.loc_conv4(output))
+        output = self.sigmoid(self.loc_conv1(features))
+        output = self.relu(self.loc_conv2(output))
+        output = self.relu(self.loc_conv3(output))
+        output = self.relu(self.loc_conv4(output))
 
         # (batch_size, num_anchors * 4, xx, xx)
         output = self.loc_regress(output)

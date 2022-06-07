@@ -463,8 +463,8 @@ class NuscenesDataset(data.Dataset):
                     images.append(torch.zeros(b[0].shape))
                 else:
                     images.append(torch.tensor(b[0]))
-                bboxes.append(torch.tensor(b[1]))
-                labels.append(torch.tensor(b[2]))
+                bboxes.append(b[1])
+                labels.append(b[2])
 
             images = torch.stack(images, dim=0)
             bboxes = torch.stack(bboxes, dim=0)
