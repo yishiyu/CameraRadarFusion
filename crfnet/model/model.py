@@ -318,16 +318,19 @@ class ClassificationSubmodel(nn.Module):
             kernel_size=3, stride=1, padding=1
         )
 
+        self.load_activation_layer()
+    
+    def load_activation_layer(self):
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
 
     def forward(self, features):
         batch_size = features.size()[0]
 
-        output = self.relu(self.cls_conv1(features))
-        output = self.relu(self.cls_conv2(output))
-        output = self.relu(self.cls_conv3(output))
-        output = self.relu(self.cls_conv4(output))
+        output = self.sigmoid(self.cls_conv1(features))
+        output = self.sigmoid(self.cls_conv2(output))
+        output = self.sigmoid(self.cls_conv3(output))
+        output = self.sigmoid(self.cls_conv4(output))
 
         # (batch_size, num_anchors * cls_num, xx, xx)
         output = self.sigmoid(self.cls_predict(output))
@@ -363,6 +366,9 @@ class RegressionSubmodel(nn.Module):
         )
         self.num_anchors = anchor_parameters['num_anchors']
 
+        self.load_activation_layer()
+    
+    def load_activation_layer(self):
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
 

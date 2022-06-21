@@ -98,6 +98,8 @@ if __name__ == '__main__':
         checkpoint = torch.load(filename)
         print('Load checkpoint from epoch {}'.format(start_epoch-1))
         model = checkpoint['model']
+        model.classification.load_activation_layer()
+        model.regression.load_activation_layer()
         optimizer = checkpoint['optimizer']
 
     else:
