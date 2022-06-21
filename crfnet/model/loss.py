@@ -75,7 +75,11 @@ class smooth_l1(nn.Module):
         # compute the normalizer: the number of positive anchors
         normalizer = max(1.0, indices.shape[0])
 
-        return self.alpha * torch.sum(loc_loss) / normalizer
+        # 图像中没有任何目标
+        if labels.shape[0]==0:
+            return 0
+        
+        return self.alpha * torch.mean(loc_loss) / normalizer
 
 
 class CRFLoss(nn.Module):
