@@ -60,6 +60,30 @@ def train(train_loader, model, loss_fn, optimizer, epoch, print_freq=10):
     # 清除变量,节省内存
     del predicted_loc, predicted_cls, images, bboxes, labels
 
+def evaluate(val_loader, model):
+    pass
+
+
+def get_data_loader(config):
+    train_dataset = NuscenesDataset(data_version=config.nusc_version, opts=config)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.batchsize,
+                                               collate_fn=train_dataset.collate_fn(
+                                                   image_dropout=config.image_dropout),
+                                               shuffle=True, pin_memory=True, 
+                                               num_workers=config.num_workders)
+    test_dataset = NuscenesDataset(data_version=config.test_version, opts=config)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.batchsize,
+                                               collate_fn=train_dataset.collate_fn(
+                                                   image_dropout=config.image_dropout),
+                                               shuffle=True, pin_memory=True, 
+                                               num_workers=config.num_workders)
+    val_dataset = NuscenesDataset(data_version=config.val_version, opts=config)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config.batchsize,
+                                               collate_fn=train_dataset.collate_fn(
+                                                   image_dropout=config.image_dropout),
+                                               shuffle=True, pin_memory=True, 
+                                               num_workers=config.num_workders)
+    return train_loader,test_loader,val_loader
 
 if __name__ == '__main__':
     FILE_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
@@ -77,14 +101,8 @@ if __name__ == '__main__':
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # 训练数据
-    # TODO 添加测试数据集加载并在训练时使用
-    train_dataset = NuscenesDataset(data_version=config.nusc_version, opts=config)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.batchsize,
-                                               collate_fn=train_dataset.collate_fn(
-                                                   image_dropout=config.image_dropout),
-                                               shuffle=True, pin_memory=True, 
-                                               num_workers=config.num_workders)
+    # 训练数据,测试数据集,验证数据集
+    train_loader, test_loader, val_loader = get_data_loader(config)
 
     # 训练模型参数
     checkpoint_dir = config.checkpoints_dir
@@ -133,3 +151,6 @@ if __name__ == '__main__':
 
         # save checkpoint
         save_checkpoint(checkpoint_dir, epoch, model, optimizer)
+
+        # 使用验证集验证
+        evaluate(val_loader, model)
