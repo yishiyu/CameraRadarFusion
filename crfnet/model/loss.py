@@ -65,21 +65,23 @@ class smooth_l1(nn.Module):
         # f(x) = 0.5 * (sigma * x)^2          if |x| < 1 / sigma / sigma
         #        |x| - 0.5 / sigma / sigma    otherwise
         regression_diff = torch.abs(preds - labels)
-        
+
         loc_loss = torch.where(
             torch.less(regression_diff, 1.0 / self.sigma_squared),
             0.5 * self.sigma_squared * torch.pow(regression_diff, 2),
-            regression_diff - 0.5/ self.sigma_squared
+            regression_diff - 0.5 / self.sigma_squared
         )
 
         # compute the normalizer: the number of positive anchors
-        normalizer = max(1.0, indices.shape[0])
+        # normalizer = max(1.0, indices.shape[0])
 
         # 图像中没有任何目标
-        if labels.shape[0]==0:
+        if labels.shape[0] == 0:
             return 0
-        
-        return self.alpha * torch.mean(loc_loss) / normalizer
+
+        # 直接根据目标数量取平均,就不再需要用batch_size再归一化了
+        # return self.alpha * torch.mean(loc_loss) / normalizer
+        return self.alpha * torch.mean(loc_loss)
 
 
 class CRFLoss(nn.Module):

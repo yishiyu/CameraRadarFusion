@@ -14,6 +14,8 @@ def get_config(config_file):
 
             # 数据集参数
             self.nusc_version = config['DATASET']['nusc_version']
+            self.test_version = config['DATASET']['test_version']
+            self.val_version = config['DATASET']['val_version']
             self.n_sweeps = config.getint('DATASET', 'n_sweeps')
 
             try:
