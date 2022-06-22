@@ -366,6 +366,8 @@ class NuscenesDataset(data.Dataset):
             (anchors.shape[0], 4+1), dtype=torch.float)
         labels_targets = torch.zeros(
             (anchors.shape[0], self.cls_num+1), dtype=torch.float)
+        # 将默认类别设为bg
+        labels_targets[:,self.classes['bg']] = 1
         # distance_targets = torch.zeros((anchors.shape[0], 1+1), dtype=torch.float, device=device)
 
         # 该场景中存在目标
@@ -389,6 +391,7 @@ class NuscenesDataset(data.Dataset):
             label_indices = annotations['labels'][tuple(
                 pos_overlap_inds)].astype(int)
 
+            labels_targets[positive_indices, self.classes['bg']] = 0
             labels_targets[positive_indices, label_indices] = 1
 
             regression_targets[:, :-1] = torch.tensor(self.bbox_transform(

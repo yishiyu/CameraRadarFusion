@@ -410,7 +410,7 @@ class CRFNet(nn.Module):
 
         # 原始图像的大小(即输入图像的大小)
         # 这样写后面好算
-        self.image_shape = torch.tensor((360, 640, 360, 640), device=device)
+        self.image_shape = torch.tensor((640, 360, 640, 360), device=device)
 
         # filter 设置
         self.nms = opts.nms
@@ -541,7 +541,7 @@ class CRFNet(nn.Module):
     def detection_filter(self, boxes, classification):
         filtered = []
         # 对每个 batch 分别进行 NMS 处理
-        for b in boxes.shape[0]:
+        for b in range(boxes.shape[0]):
             filtered.append(
                 self._batch_detection_filter(boxes[b],
                                              classification[b])

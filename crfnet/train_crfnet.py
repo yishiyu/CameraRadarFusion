@@ -1,8 +1,11 @@
 import os
-from tabnanny import check
+import cv2
+import numpy as np
 import time
 import argparse
 import torch
+from utils.visualization import draw_detections
+from data_processing.fusion.fusion_projection_lines import create_imagep_visualization
 from data_processing.datasets.nuscenes_dataset import NuscenesDataset
 from torch.utils.data import DataLoader
 from utils.config import get_config
@@ -60,7 +63,60 @@ def train(train_loader, model, loss_fn, optimizer, epoch, print_freq=10):
     # 清除变量,节省内存
     del predicted_loc, predicted_cls, images, bboxes, labels
 
-def evaluate(val_loader, model):
+def evaluate(val_loader, model, save_path=None, render=False):
+    # 用当前模型在一张图片上预测
+    images, bboxes_gt, labels_gt = next(iter(val_loader))
+    model.eval()
+
+    # filtered = [
+    #   [boxes, scores, labels] * batch_size
+    # ]
+    filtered_result = model.predict(images.to(device))
+
+    # eval.py 65
+    for i, (boxes, scores, labels) in enumerate(filtered_result):
+        boxes = boxes.cpu().detach().numpy()
+        scores = scores.cpu().detach().numpy()
+        labels = labels.cpu().detach().numpy()
+
+        # select indices which have a score above the threshold
+        indices = np.where(scores>config.score_threshold)[0]
+
+        # select those scores
+        scores = scores[indices]
+
+        # find the order with which to sort the scores
+        scores_sort = np.argsort(-scores)[:config.max_detections]
+
+        # select detections
+        image_boxes      = boxes[indices[scores_sort], :]
+        image_scores     = scores[scores_sort]
+        image_labels     = labels[indices[scores_sort]]
+
+        image_detections = np.concatenate([image_boxes, np.expand_dims(image_scores, axis=1), np.expand_dims(image_labels, axis=1)], axis=1)
+
+        # Create Visualization
+        if save_path or render:
+            viz_image = np.ascontiguousarray(images[i][:3].permute((1,2,0)).numpy()*255, dtype=np.uint8)
+            # viz_image = create_imagep_visualization(images, cfg=config)
+            #draw_annotations(viz_image, generator.load_annotations(i), label_to_name=generator.label_to_name) # Draw annotations
+            draw_detections(viz_image, image_boxes, image_scores, image_labels,score_threshold=config.score_threshold, label_to_name=None) # Draw detections
+        
+        if render:
+            # Show 
+            try:
+                cv2.imshow("debug", viz_image)
+                cv2.waitKey(1)
+            except Exception as e:
+                print("Render error:")
+                print(e)
+
+        if save_path is not None:
+            # Store
+            if not os.path.exists(save_path):
+                os.mkdir(save_path)
+            result = cv2.imwrite(os.path.join(save_path, '{}.jpg'.format(i)), viz_image)
+            pass
     pass
 
 
@@ -122,7 +178,8 @@ if __name__ == '__main__':
 
     else:
         # 创建模型
-        model = CRFNet(opts=config, load_pretrained_vgg=True)
+        model = CRFNet(opts=config, load_pretrained_vgg=True).to(device)
+        evaluate(val_loader, model, save_path='log/epoch{}'.format(start_epoch))
 
         # 训练参数
         lr = config.learning_rate
@@ -153,4 +210,4 @@ if __name__ == '__main__':
         save_checkpoint(checkpoint_dir, epoch, model, optimizer)
 
         # 使用验证集验证
-        evaluate(val_loader, model)
+        evaluate(val_loader, model, save_path='./log/epoch{}'.format(epoch))
