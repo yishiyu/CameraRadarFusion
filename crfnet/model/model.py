@@ -140,15 +140,23 @@ class BackBoneSubmodel(nn.Module):
             pretrained=True).state_dict()
         pretrained_param_names = list(pretrained_state_dict.keys())
         # 每个block的首个conv层形状不同,所以不能加载预训练参数
-        param_index_to_load = [1, 2, 3, 5, 6, 7, 9, 10, 11,
-                               12, 13, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25]
+        input_param_index_to_load = [0,4,8,14,20]
+        conv_param_index_to_load = [1,2,3,
+                                    5,6,7,
+                                    9,10,11,12,13,
+                                    15,16,17,18,19,
+                                    21,22,23,24,25]
         # param_index_to_set_zero = [0,4,8,14,20]
         # param_index_to_load = [2, 3, 6, 7, 10, 11,
         #                        12, 13, 16, 17, 18, 19,
         #                        22, 23, 24, 25]
 
+        for i in input_param_index_to_load:
+            param = param_names[i]
+            state_dict[param][:,:-2,:,:] = pretrained_state_dict[pretrained_param_names[i]]
+
         # 加载VGG中的参数(只加载特征提取卷积层,不要最后的全连接层)
-        for i in param_index_to_load:
+        for i in conv_param_index_to_load:
             param = param_names[i]
             state_dict[param] = pretrained_state_dict[pretrained_param_names[i]]
 
