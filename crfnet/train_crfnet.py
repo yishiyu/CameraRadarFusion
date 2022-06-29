@@ -127,8 +127,8 @@ def get_data_loader(config):
                                                    image_dropout=config.image_dropout),
                                                shuffle=True, pin_memory=True, 
                                                num_workers=config.num_workders)
-    test_dataset = NuscenesDataset(data_version=config.test_version, opts=config)
     test_loader = None
+    test_dataset = NuscenesDataset(data_version=config.test_version, opts=config)
     # test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.batchsize,
     #                                            collate_fn=train_dataset.collate_fn(
     #                                                image_dropout=config.image_dropout),
@@ -141,6 +141,7 @@ def get_data_loader(config):
                                                shuffle=True, pin_memory=True, 
                                                num_workers=config.num_workders)
     return train_loader,test_loader,val_loader
+    # return train_loader, train_loader, train_loader
 
 if __name__ == '__main__':
     FILE_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
@@ -201,7 +202,7 @@ if __name__ == '__main__':
                                     weight_decay=weight_decay)
 
     model = model.to(device)
-    crf_loss = CRFLoss().to(device)
+    crf_loss = CRFLoss(config.cls_num).to(device)
 
     for epoch in range(start_epoch, epochs):
         # 调整lr

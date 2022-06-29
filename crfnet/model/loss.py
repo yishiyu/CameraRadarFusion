@@ -12,12 +12,21 @@ class focal_loss(nn.Module):
     参考losses.py中的focal函数
     """
 
-    def __init__(self, alpha=0.25, gamma=2):
+    def __init__(self, num_classes, alpha=0.25, gamma=2, size_average=True):
         super(focal_loss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
 
-        self.cross_entropy = nn.CrossEntropyLoss()
+        # self.cross_entropy = nn.CrossEntropyLoss()
+        self.size_average = size_average
+
+        assert alpha<1
+        self.alpha = torch.zeros(num_classes)
+        self.alpha[0] += alpha
+        self.alpha[1:] += (1-alpha)
+        self.alpha = self.alpha.to(device)
+        # 0号下标为背景
+        # self.alpha 最终为 [ α, 1-α, 1-α, 1-α, 1-α, ...] size:[num_classes]
 
     def forward(self, preds, labels):
         # 多一个anchor state: -1 for ignore, 0 for background, 1 for object
@@ -30,20 +39,45 @@ class focal_loss(nn.Module):
         indices = (anchor_state != -1)
         labels = labels[indices]
         preds = preds[indices]
+        labels = torch.argmax(labels, dim=1)
+        # preds ==> (batch_size * 42975, cls_num)
+        # labels ==> (batch_size * 42975)
 
-        # 计算focal loss
-        alpha_factor = torch.ones_like(labels) * self.alpha
-        alpha_factor = torch.where(labels == 1, alpha_factor, 1-alpha_factor)
-        focal_weight = torch.where(labels == 1, 1-preds, preds)
-        focal_weight = alpha_factor * focal_weight ** self.gamma
+        # 参考自 https://github.com/yatengLG/Focal-Loss-Pytorch/blob/master/Focal_Loss.py
+        # assert preds.dim()==2 and labels.dim()==1
+        preds = preds.view(-1,preds.size(-1))
+        # log_softmax, softmax
+        preds_logsoft = torch.log(preds)
+        preds_softmax = preds
 
-        cls_loss = focal_weight * self.cross_entropy(labels, preds)
+        # 这部分实现nll_loss ( crossempty = log_softmax + nll )
+        preds_softmax = preds_softmax.gather(1,labels.view(-1,1))   
+        preds_logsoft = preds_logsoft.gather(1,labels.view(-1,1))
+        self.alpha = self.alpha.gather(0,labels.view(-1))
 
-        # compute the normalizer: the number of positive anchors
-        normalizer = (anchor_state == 1).shape[0]
-        normalizer = max(1.0, normalizer)
+        # torch.pow((1-preds_softmax), self.gamma) 为focal loss中 (1-pt)**γ
+        loss = -torch.mul(torch.pow((1-preds_softmax), self.gamma), preds_logsoft)  
 
-        return torch.sum(cls_loss)/normalizer
+        loss = torch.mul(self.alpha, loss.t())
+        if self.size_average:
+            loss = loss.mean()
+        else:
+            loss = loss.sum()
+        return loss
+
+        # # 计算focal loss
+        # alpha_factor = torch.ones_like(labels) * self.alpha
+        # alpha_factor = torch.where(labels == 1, alpha_factor, 1-alpha_factor)
+        # focal_weight = torch.where(labels == 1, 1-preds, preds)
+        # focal_weight = alpha_factor * focal_weight ** self.gamma
+
+        # cls_loss = focal_weight * self.cross_entropy(labels, preds)
+
+        # # compute the normalizer: the number of positive anchors
+        # normalizer = (anchor_state == 1).shape[0]
+        # normalizer = max(1.0, normalizer)
+
+        # return torch.sum(cls_loss)/normalizer
 
 
 class smooth_l1(nn.Module):
@@ -92,11 +126,11 @@ class CRFLoss(nn.Module):
     2. confidence loss
     """
 
-    def __init__(self):
+    def __init__(self, num_classes):
         super(CRFLoss, self).__init__()
 
         self.smooth_l1 = smooth_l1()
-        self.focal_loss = focal_loss()
+        self.focal_loss = focal_loss(num_classes)
 
     def forward(self, predicted_locs, predicted_scores, bboxes, labels):
         # predicted_locs ==> (batch_size, n_anchors , xx, xx, 4)
