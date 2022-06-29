@@ -202,7 +202,10 @@ if __name__ == '__main__':
                                     weight_decay=weight_decay)
 
     model = model.to(device)
-    crf_loss = CRFLoss(config.cls_num).to(device)
+    crf_loss = CRFLoss(num_classes=config.cls_num, 
+                    focal_loss_alpha=config.focal_loss_alpha, 
+                    focal_loss_gamma=config.focal_loss_gamma
+                    ).to(device)
 
     for epoch in range(start_epoch, epochs):
         # 调整lr

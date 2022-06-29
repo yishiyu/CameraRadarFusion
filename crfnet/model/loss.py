@@ -126,11 +126,13 @@ class CRFLoss(nn.Module):
     2. confidence loss
     """
 
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, focal_loss_alpha=0.25, focal_loss_gamma=2):
         super(CRFLoss, self).__init__()
 
         self.smooth_l1 = smooth_l1()
-        self.focal_loss = focal_loss(num_classes)
+        self.focal_loss = focal_loss(num_classes,
+                                     alpha=focal_loss_alpha,
+                                     gamma=focal_loss_gamma)
 
     def forward(self, predicted_locs, predicted_scores, bboxes, labels):
         # predicted_locs ==> (batch_size, n_anchors , xx, xx, 4)

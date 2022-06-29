@@ -48,6 +48,8 @@ def get_config(config_file):
                 self.only_radar_annotated = 0
 
             # 训练超参数
+            self.focal_loss_alpha = config.getfloat('HYPERPARAMETERS', 'focal_loss_alpha')
+            self.focal_loss_gamma = config.getfloat('HYPERPARAMETERS', 'focal_loss_gamma')
             self.learning_rate = config.getfloat('HYPERPARAMETERS', 'learning_rate')
             self.num_workders = config.getint('HYPERPARAMETERS','num_workders')
             self.batchsize = config.getint('HYPERPARAMETERS', 'batchsize')
