@@ -323,6 +323,7 @@ class ClassificationSubmodel(nn.Module):
     def load_activation_layer(self):
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim=2)
 
     def forward(self, features):
         batch_size = features.size()[0]
@@ -338,6 +339,7 @@ class ClassificationSubmodel(nn.Module):
         output = output.permute(0, 2, 3, 1).contiguous()
         # (batch_size, num_anchors * feature.shape, cls_num)
         output = output.view(batch_size, -1, self.cls_num)
+        output = self.softmax(output)
 
         return output
 

@@ -128,11 +128,12 @@ def get_data_loader(config):
                                                shuffle=True, pin_memory=True, 
                                                num_workers=config.num_workders)
     test_dataset = NuscenesDataset(data_version=config.test_version, opts=config)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.batchsize,
-                                               collate_fn=train_dataset.collate_fn(
-                                                   image_dropout=config.image_dropout),
-                                               shuffle=True, pin_memory=True, 
-                                               num_workers=config.num_workders)
+    test_loader = None
+    # test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.batchsize,
+    #                                            collate_fn=train_dataset.collate_fn(
+    #                                                image_dropout=config.image_dropout),
+    #                                            shuffle=True, pin_memory=True, 
+    #                                            num_workers=config.num_workders)
     val_dataset = NuscenesDataset(data_version=config.val_version, opts=config)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config.batchsize,
                                                collate_fn=train_dataset.collate_fn(
@@ -175,6 +176,8 @@ if __name__ == '__main__':
         model.classification.load_activation_layer()
         model.regression.load_activation_layer()
         optimizer = checkpoint['optimizer']
+
+        evaluate(val_loader, model, save_path='log/epoch{}'.format(start_epoch))
 
     else:
         # 创建模型
